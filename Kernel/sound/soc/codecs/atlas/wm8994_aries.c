@@ -21,6 +21,9 @@
 #include <mach/atlas/gpio-aries.h>
 #include "wm8994.h"
 #include <mach/sec_jack.h>
+#ifdef CONFIG_SND_VOODOO
+#include "wm8994_voodoo.h"
+#endif
 
 //------------------------------------------------
 //		Debug Feature
