@@ -7,7 +7,7 @@
 busybox mount -o remount,rw /
 busybox mount -o remount,rw /system
 
-# Install BusyBox 1.19
+# Install BusyBox 1.18
 
 /sbin/busybox --install -s /system/bin
 # /sbin/busybox --install -s /sbin

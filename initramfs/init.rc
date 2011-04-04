@@ -116,13 +116,10 @@ loglevel 3
     write /dev/cpuctl/bg_non_interactive/cpu.shares 52
 # mount mtd partitions
     # Mount /system rw first to give the filesystem a chance to save a checkpoint
-	mount ext4 /dev/block/stl9 /system wait noatime nosuid nodev
+	mount ext4 /dev/block/stl9 /system noatime nodiratime check=n errors=continue nobh data=writeback barrier=0 discard noauto_da_alloc
 	mount rfs /dev/block/stl9 /system check=no
 
-#    mount yaffs2 mtd@system /system ro remount
-
     # We chown/chmod /data again so because mount is run as root + defaults
-##    mount yaffs2 mtd@userdata /data nosuid nodev
 
 #    mount rfs /dev/block/stl7 /data nosuid nodev check=no
 
@@ -132,7 +129,7 @@ loglevel 3
 ###################################################################    
 # create SEC_INTERNAL_STORAGE 1/3   
 ##    mount ext3 /dev/block/mmcblk0p1 /userdata nosuid nodev
-	mount ext4 /dev/block/mmcblk0p1 /data wait noatime nosuid nodev
+    mount ext4 /dev/block/mmcblk0p1 /data wait noatime nosuid nodev
     mount rfs /dev/block/mmcblk0p1 /data nosuid nodev check=no
     chown system system /data
     chmod 0771 /data
@@ -142,7 +139,7 @@ loglevel 3
 ###################################################################    
 # create dbdata partition
 mkdir /dbdata
-mount ext4 /dev/block/stl10 /dbdata wait noatime nosuid nodev
+mount ext4 /dev/block/stl10 /dbata nosuid nodev noatime nodiratime check=n errors=continue nobh discard data=writeback barrier=0 noauto_da_alloc
 mount rfs /dev/block/stl10 /dbdata nosuid nodev check=no
 mkdir /dbdata/databases
 chown system system /dbdata
@@ -183,8 +180,7 @@ chmod 0777 /dbdata/databases
 
 
     # Same reason as /data above
-    #mount yaffs2 mtd@cache /cache nosuid nodev
-	mount ext4 /dev/block/stl11 /cache wait noatime nosuid nodev
+    mount ext4 /dev/block/stl11 /cache nosuid nodev noatime nodiratime check=n errors=continue nobh discard data=writeback barrier=0 noauto_da_alloc
     mount rfs /dev/block/stl11 /cache nosuid nodev check=no
     chown system cache /cache
     chmod 0770 /cache
@@ -211,11 +207,7 @@ chmod 0777 /dbdata/databases
 
     
     mount rfs /dev/block/stl3 /efs nosuid nodev check=no
-	#removed by khoonk for parameter reading on 20100321
-    #mount j4fs /dev/block/stl6 /mnt/.lfs
-	#removed by khoonk for parameter reading on 20100321
 
-    #chown system system /efs
     chown radio radio /efs
     chmod 0771 /efs
 
@@ -224,8 +216,6 @@ chmod 0777 /dbdata/databases
 	chown system /data/gps
 	chmod 771 /data/gps
 # GPS development for broadcom.    
-    #chmod 0777 /system/bin/gpsd/glgps_samsungJupiter
-    #chmod 0666 /system/lib/libgps.so
     chmod 600 /system/etc/secgps.conf
     
 # create basic filesystem structure
@@ -627,11 +617,11 @@ service media /system/bin/mediaserver
 #    group audio
 #    oneshot
 
-#service bootanim /system/bin/bootanimation2nd
-#    user graphics
-#    group graphics
-#    disabled
-#    oneshot
+service bootanim /system/bin/bootanimation2nd
+    user graphics
+    group graphics
+    disabled
+    oneshot
 	
 # to enable wifi
 service wpa_supplicant /system/bin/wpa_supplicant -Dwext -ieth0 -c/data/wifi/bcm_supp.conf
