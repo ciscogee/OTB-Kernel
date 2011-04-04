@@ -34,6 +34,7 @@ on init
  
 	
     #Thomas Ryu, Cache 
+    mount ext4 /dev/block/stl11 /cache wait noatime nosuid nodev
     mount rfs /dev/block/stl11 /cache nosuid nodev check=no
     chown system cache /cache
     chmod 0770 /cache
@@ -47,6 +48,7 @@ on init
     #chmod 0770 /cache/recovery_fota_mode
     
     #Garnett/Atlas
+    mount ext4 /dev/block/mmcblk0p1 /data wait noatime nosuid nodev
     mount rfs /dev/block/mmcblk0p1 /data nosuid nodev check=no
     chown system system /data
     chmod 0771 /data
@@ -64,6 +66,7 @@ on init
     #chown system system /data
     #chmod 0771 /data
 
+	mount ext4 /dev/block/stl9 /system wait noatime nosuid nodev
   	mount rfs /dev/block/stl9 /system check=no
 
 on boot
