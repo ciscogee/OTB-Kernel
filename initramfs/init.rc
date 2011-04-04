@@ -382,6 +382,7 @@ on boot
     setprop ro.HIDDEN_APP_MEM 10240
     setprop ro.CONTENT_PROVIDER_MEM 11264
     setprop ro.EMPTY_APP_MEM 12288
+    setprop ro.FOREGROUND_APP_MEM 1536
 
 # Write value must be consistent with the above properties.
 # Note that the driver only supports 6 slots, so we have HOME_APP at the
@@ -413,10 +414,10 @@ on boot
     chown radio system /sys/power/wake_lock
     chown radio system /sys/power/wake_unlock
     chown radio system /sys/power/dvfslock_ctrl     
-    chmod 0660 /sys/power/state
-    chmod 0660 /sys/power/wake_lock
-    chmod 0660 /sys/power/wake_unlock
-    chmod 0660 /sys/power/dvfslock_ctrl    
+    chmod 0666 /sys/power/state
+    chmod 0666 /sys/power/wake_lock
+    chmod 0666 /sys/power/wake_unlock
+    chmod 0666 /sys/power/dvfslock_ctrl    
     chown system system /sys/class/timed_output/vibrator/enable
     chmod 0777 /sys/class/timed_output/vibrator/enable
     chown system system /sys/class/leds/keyboard-backlight/brightness
@@ -740,7 +741,8 @@ on property:init.svc.wpa_supplicant=stopped
 
 on property:init.svc.dhcpcd=stopped
 #    dhcpcd -k eth0
-# end of wifi
+#    start pppd_cdma
+#end of wifi
 
 # for Mobile AP
 service mobileAP /system/bin/wlp2pservice
