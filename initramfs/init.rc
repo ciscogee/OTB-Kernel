@@ -617,7 +617,7 @@ service media /system/bin/mediaserver
 #    group audio
 #    oneshot
 
-service bootanim /system/bin/bootanimation2nd
+service bootanim /system/bin/bootanimation
     user graphics
     group graphics
     disabled
