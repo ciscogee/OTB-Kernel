@@ -1,5 +1,5 @@
 /*
- * Read-Copy Update mechanism for mutual exclusion
+ * Read-Copy Update mechanism for mutual exclusion, the Bloatwatch edition.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,77 +15,246 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
- * Copyright IBM Corporation, 2001
+ * Copyright IBM Corporation, 2008
  *
- * Authors: Dipankar Sarma <dipankar@in.ibm.com>
- *	    Manfred Spraul <manfred@colorfullife.com>
- *
- * Based on the original work by Paul McKenney <paulmck@us.ibm.com>
- * and inputs from Rusty Russell, Andrea Arcangeli and Andi Kleen.
- * Papers:
- * http://www.rdrop.com/users/paulmck/paper/rclockpdcsproof.pdf
- * http://lse.sourceforge.net/locking/rclock_OLS.2001.05.01c.sc.pdf (OLS2001)
+ * Author: Paul E. McKenney <paulmck@linux.vnet.ibm.com>
  *
  * For detailed explanation of Read-Copy Update mechanism see -
- *		http://lse.sourceforge.net/locking/rcupdate.html
- *
+ * 		Documentation/RCU
  */
+
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/spinlock.h>
-#include <linux/smp.h>
+#include <linux/rcupdate.h>
 #include <linux/interrupt.h>
 #include <linux/sched.h>
-#include <asm/atomic.h>
-#include <linux/bitops.h>
-#include <linux/percpu.h>
+#include <linux/module.h>
+#include <linux/completion.h>
+#include <linux/moduleparam.h>
 #include <linux/notifier.h>
 #include <linux/cpu.h>
 #include <linux/mutex.h>
-#include <linux/module.h>
-#include <linux/kernel_stat.h>
+#include <linux/time.h>
 
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-static struct lock_class_key rcu_lock_key;
-struct lockdep_map rcu_lock_map =
-	STATIC_LOCKDEP_MAP_INIT("rcu_read_lock", &rcu_lock_key);
-EXPORT_SYMBOL_GPL(rcu_lock_map);
-#endif
+/* Global control variables for rcupdate callback mechanism. */
+struct rcu_ctrlblk {
+	struct rcu_head *rcucblist;	/* List of pending callbacks (CBs). */
+	struct rcu_head **donetail;	/* ->next pointer of last "done" CB. */
+	struct rcu_head **curtail;	/* ->next pointer of last CB. */
+};
 
-int rcu_scheduler_active __read_mostly;
+/* Definition for rcupdate control block. */
+static struct rcu_ctrlblk rcu_ctrlblk = {
+	.rcucblist = NULL,
+	.donetail = &rcu_ctrlblk.rcucblist,
+	.curtail = &rcu_ctrlblk.rcucblist,
+};
+static struct rcu_ctrlblk rcu_bh_ctrlblk = {
+	.rcucblist = NULL,
+	.donetail = &rcu_bh_ctrlblk.rcucblist,
+	.curtail = &rcu_bh_ctrlblk.rcucblist,
+};
+
+#ifdef CONFIG_NO_HZ
+
+static long rcu_dynticks_nesting = 1;
 
 /*
- * Awaken the corresponding synchronize_rcu() instance now that a
- * grace period has elapsed.
+ * Enter dynticks-idle mode, which is an extended quiescent state
+ * if we have fully entered that mode (i.e., if the new value of
+ * dynticks_nesting is zero).
  */
-void wakeme_after_rcu(struct rcu_head  *head)
+void rcu_enter_nohz(void)
 {
-	struct rcu_synchronize *rcu;
-
-	rcu = container_of(head, struct rcu_synchronize, head);
-	complete(&rcu->completion);
+	if (--rcu_dynticks_nesting == 0)
+		rcu_sched_qs(0); /* implies rcu_bh_qsctr_inc(0) */
 }
 
-#ifndef CONFIG_TINY_RCU
-
-#ifdef CONFIG_TREE_PREEMPT_RCU
-
-/**
- * synchronize_rcu - wait until a grace period has elapsed.
- *
- * Control will return to the caller some time after a full grace
- * period has elapsed, in other words after all currently executing RCU
- * read-side critical sections have completed.  RCU read-side critical
- * sections are delimited by rcu_read_lock() and rcu_read_unlock(),
- * and may be nested.
+/*
+ * Exit dynticks-idle mode, so that we are no longer in an extended
+ * quiescent state.
  */
-void synchronize_rcu(void)
+void rcu_exit_nohz(void)
+{
+	rcu_dynticks_nesting++;
+}
+
+#endif /* #ifdef CONFIG_NO_HZ */
+
+/*
+ * Helper function for rcu_qsctr_inc() and rcu_bh_qsctr_inc().
+ * Also disable irqs to avoid confusion due to interrupt handlers invoking
+ * call_rcu().
+ */
+static int rcu_qsctr_help(struct rcu_ctrlblk *rcp)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+	if (rcp->rcucblist != NULL &&
+	    rcp->donetail != rcp->curtail) {
+		rcp->donetail = rcp->curtail;
+		local_irq_restore(flags);
+		return 1;
+	}
+	local_irq_restore(flags);
+	return 0;
+}
+
+/*
+ * Record an rcu quiescent state.  And an rcu_bh quiescent state while we
+ * are at it, given that any rcu quiescent state is also an rcu_bh
+ * quiescent state.  Use "+" instead of "||" to defeat short circuiting.
+ */
+void rcu_sched_qs(int cpu)
+{
+	if (rcu_qsctr_help(&rcu_ctrlblk) + rcu_qsctr_help(&rcu_bh_ctrlblk))
+		raise_softirq(RCU_SOFTIRQ);
+}
+
+/*
+ * Record an rcu_bh quiescent state.
+ */
+void rcu_bh_qs(int cpu)
+{
+	if (rcu_qsctr_help(&rcu_bh_ctrlblk))
+		raise_softirq(RCU_SOFTIRQ);
+}
+
+/*
+ * Check to see if the scheduling-clock interrupt came from an extended
+ * quiescent state, and, if so, tell RCU about it.
+ */
+void rcu_check_callbacks(int cpu, int user)
+{
+	if (user ||
+	    (idle_cpu(cpu) &&
+	     !in_softirq() &&
+	     hardirq_count() <= (1 << HARDIRQ_SHIFT)))
+		rcu_sched_qs(cpu);
+	else if (!in_softirq())
+		rcu_bh_qs(cpu);
+}
+
+/*
+ * Helper function for rcu_process_callbacks() that operates on the
+ * specified rcu_ctrlkblk structure.
+ */
+static void __rcu_process_callbacks(struct rcu_ctrlblk *rcp)
+{
+	unsigned long flags;
+	struct rcu_head *next, *list;
+
+	/* If no RCU callbacks ready to invoke, just return. */
+	if (&rcp->rcucblist == rcp->donetail)
+		return;
+
+	/* Move the ready-to-invoke callbacks to a local list. */
+	local_irq_save(flags);
+	list = rcp->rcucblist;
+	rcp->rcucblist = *rcp->donetail;
+	*rcp->donetail = NULL;
+	if (rcp->curtail == rcp->donetail)
+		rcp->curtail = &rcp->rcucblist;
+	rcp->donetail = &rcp->rcucblist;
+	local_irq_restore(flags);
+
+	/* Invoke the callbacks on the local list. */
+	while (list) {
+		next = list->next;
+		prefetch(next);
+		list->func(list);
+		list = next;
+	}
+}
+
+/*
+ * Invoke any callbacks whose grace period has completed.
+ */
+static void rcu_process_callbacks(struct softirq_action *unused)
+{
+	__rcu_process_callbacks(&rcu_ctrlblk);
+	__rcu_process_callbacks(&rcu_bh_ctrlblk);
+}
+
+/*
+ * Null function to handle CPU being onlined.  Longer term, we want to
+ * make TINY_RCU avoid using rcupdate.c, but later...
+ */
+int rcu_cpu_notify(struct notifier_block *self,
+		   unsigned long action, void *hcpu)
+{
+	return NOTIFY_OK;
+}
+
+/*
+ * Wait for a grace period to elapse.  But it is illegal to invoke
+ * synchronize_sched() from within an RCU read-side critical section.
+ * Therefore, any legal call to synchronize_sched() is a quiescent
+ * state, and so on a UP system, synchronize_sched() need do nothing.
+ * Ditto for synchronize_rcu_bh().  (But Lai Jiangshan points out the
+ * benefits of doing might_sleep() to reduce latency.)
+ *
+ * Cool, huh?  (Due to Josh Triplett.)
+ *
+ * But we want to make this a static inline later.
+ */
+void synchronize_sched(void)
+{
+	cond_resched();
+}
+EXPORT_SYMBOL_GPL(synchronize_sched);
+
+void synchronize_rcu_bh(void)
+{
+	synchronize_sched();
+}
+EXPORT_SYMBOL_GPL(synchronize_rcu_bh);
+
+/*
+ * Helper function for call_rcu() and call_rcu_bh().
+ */
+static void __call_rcu(struct rcu_head *head,
+		       void (*func)(struct rcu_head *rcu),
+		       struct rcu_ctrlblk *rcp)
+{
+	unsigned long flags;
+
+	head->func = func;
+	head->next = NULL;
+	local_irq_save(flags);
+	*rcp->curtail = head;
+	rcp->curtail = &head->next;
+	local_irq_restore(flags);
+}
+
+/*
+ * Post an RCU callback to be invoked after the end of an RCU grace
+ * period.  But since we have but one CPU, that would be after any
+ * quiescent state.
+ */
+void call_rcu(struct rcu_head *head,
+	      void (*func)(struct rcu_head *rcu))
+{
+	__call_rcu(head, func, &rcu_ctrlblk);
+}
+EXPORT_SYMBOL_GPL(call_rcu);
+
+/*
+ * Post an RCU bottom-half callback to be invoked after any subsequent
+ * quiescent state.
+ */
+void call_rcu_bh(struct rcu_head *head,
+		 void (*func)(struct rcu_head *rcu))
+{
+	__call_rcu(head, func, &rcu_bh_ctrlblk);
+}
+EXPORT_SYMBOL_GPL(call_rcu_bh);
+
+void rcu_barrier(void)
 {
 	struct rcu_synchronize rcu;
-
-	if (!rcu_scheduler_active)
-		return;
 
 	init_completion(&rcu.completion);
 	/* Will wake me after RCU finished. */
@@ -93,63 +262,11 @@ void synchronize_rcu(void)
 	/* Wait for it. */
 	wait_for_completion(&rcu.completion);
 }
-EXPORT_SYMBOL_GPL(synchronize_rcu);
+EXPORT_SYMBOL_GPL(rcu_barrier);
 
-#endif /* #ifdef CONFIG_TREE_PREEMPT_RCU */
-
-/**
- * synchronize_sched - wait until an rcu-sched grace period has elapsed.
- *
- * Control will return to the caller some time after a full rcu-sched
- * grace period has elapsed, in other words after all currently executing
- * rcu-sched read-side critical sections have completed.   These read-side
- * critical sections are delimited by rcu_read_lock_sched() and
- * rcu_read_unlock_sched(), and may be nested.  Note that preempt_disable(),
- * local_irq_disable(), and so on may be used in place of
- * rcu_read_lock_sched().
- *
- * This means that all preempt_disable code sequences, including NMI and
- * hardware-interrupt handlers, in progress on entry will have completed
- * before this primitive returns.  However, this does not guarantee that
- * softirq handlers will have completed, since in some kernels, these
- * handlers can run in process context, and can block.
- *
- * This primitive provides the guarantees made by the (now removed)
- * synchronize_kernel() API.  In contrast, synchronize_rcu() only
- * guarantees that rcu_read_lock() sections will have completed.
- * In "classic RCU", these two guarantees happen to be one and
- * the same, but can differ in realtime RCU implementations.
- */
-void synchronize_sched(void)
+void rcu_barrier_bh(void)
 {
 	struct rcu_synchronize rcu;
-
-	if (rcu_blocking_is_gp())
-		return;
-
-	init_completion(&rcu.completion);
-	/* Will wake me after RCU finished. */
-	call_rcu_sched(&rcu.head, wakeme_after_rcu);
-	/* Wait for it. */
-	wait_for_completion(&rcu.completion);
-}
-EXPORT_SYMBOL_GPL(synchronize_sched);
-
-/**
- * synchronize_rcu_bh - wait until an rcu_bh grace period has elapsed.
- *
- * Control will return to the caller some time after a full rcu_bh grace
- * period has elapsed, in other words after all currently executing rcu_bh
- * read-side critical sections have completed.  RCU read-side critical
- * sections are delimited by rcu_read_lock_bh() and rcu_read_unlock_bh(),
- * and may be nested.
- */
-void synchronize_rcu_bh(void)
-{
-	struct rcu_synchronize rcu;
-
-	if (rcu_blocking_is_gp())
-		return;
 
 	init_completion(&rcu.completion);
 	/* Will wake me after RCU finished. */
@@ -157,35 +274,21 @@ void synchronize_rcu_bh(void)
 	/* Wait for it. */
 	wait_for_completion(&rcu.completion);
 }
-EXPORT_SYMBOL_GPL(synchronize_rcu_bh);
+EXPORT_SYMBOL_GPL(rcu_barrier_bh);
 
-#endif /* #ifndef CONFIG_TINY_RCU */
-
-static int __cpuinit rcu_barrier_cpu_hotplug(struct notifier_block *self,
-		unsigned long action, void *hcpu)
+void rcu_barrier_sched(void)
 {
-	return rcu_cpu_notify(self, action, hcpu);
+	struct rcu_synchronize rcu;
+
+	init_completion(&rcu.completion);
+	/* Will wake me after RCU finished. */
+	call_rcu_sched(&rcu.head, wakeme_after_rcu);
+	/* Wait for it. */
+	wait_for_completion(&rcu.completion);
 }
+EXPORT_SYMBOL_GPL(rcu_barrier_sched);
 
-void __init rcu_init(void)
+void __rcu_init(void)
 {
-	int i;
-
-	__rcu_init();
-	cpu_notifier(rcu_barrier_cpu_hotplug, 0);
-
-	/*
-	 * We don't need protection against CPU-hotplug here because
-	 * this is called early in boot, before either interrupts
-	 * or the scheduler are operational.
-	 */
-	for_each_online_cpu(i)
-		rcu_barrier_cpu_hotplug(NULL, CPU_UP_PREPARE, (void *)(long)i);
-}
-
-void rcu_scheduler_starting(void)
-{
-	WARN_ON(num_online_cpus() != 1);
-	WARN_ON(nr_context_switches() > 0);
-	rcu_scheduler_active = 1;
+	open_softirq(RCU_SOFTIRQ, rcu_process_callbacks);
 }
