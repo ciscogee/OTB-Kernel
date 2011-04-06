@@ -16,8 +16,8 @@ on init
 	insmod /lib/modules/param.ko 
 	insmod /lib/modules/vibrator.ko
  
-  	mount ext4 /dev/block/stl9 /system check=no errors=continue
-	mount rfs /dev/block/stl9 /system check=no
+  	mount rfs /dev/block/stl9 /system check=no
+        mount ext4 /dev/block/stl9 /system wait noatime nosuid nodev
 on boot
 #	write /sys/class/sec/switch/usb_sel PDA
 

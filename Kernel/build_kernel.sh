@@ -1,5 +1,7 @@
 #!/bin/bash
 
+tag=OTB-TW
+
 WORK=`pwd`
 cd ..
 
@@ -14,7 +16,7 @@ fi
 cd $WORK
 rm -f kernel_update-"$tag".zip
 make clean mrproper
-make ARCH=arm nemesis2all_defconfig
+make ARCH=arm OTB_defconfig
 make -j `expr $(grep processor /proc/cpuinfo | wc -l) + 1` CROSS_COMPILE=../arm-2009q3/bin/arm-none-linux-gnueabi- \
 	ARCH=arm HOSTCFLAGS="-g -O3"
 
