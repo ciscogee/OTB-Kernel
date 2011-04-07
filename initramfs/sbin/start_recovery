@@ -5,8 +5,6 @@ rm /sdcard
 mkdir /sdcard
 
 cd /sbin
-mv mount.wrapper mount
-chmod 755 mount
 ln -s busybox /sbin/[
 ln -s busybox /sbin/[[
 ln -s recovery /sbin/amend
@@ -158,6 +156,9 @@ ln -s busybox /sbin/whoami
 ln -s busybox /sbin/xargs
 ln -s busybox /sbin/yes
 ln -s busybox /sbin/zcat
+
+mv mount.wrapper mount
+chmod 755 mount
 
 # run the actual recovery
 /sbin/recovery &

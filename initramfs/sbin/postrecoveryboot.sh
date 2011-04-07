@@ -1,6 +1,7 @@
 #!/sbin/sh
-rm /etc
+rm -f /etc
 mkdir -p /etc
+cp /sbin/recovery.fstab /etc/recovery.fstab
 mkdir -p /datadata
 chmod 4777 /sbin/su
 umount /efs
