@@ -75,6 +75,9 @@ bool g_dvfs_fix_lock_limit = false; // global variable to avoid up frequency sca
 
 #endif //ENABLE_DVFS_LOCK_HIGH
 
+extern int store_up_down_threshold(unsigned int down_threshold_value,
+				unsigned int up_threshold_value);
+
 /* frequency */
 static struct cpufreq_frequency_table s5pc110_freq_table_1GHZ[] = {
 	{L0, 1300*1000},
@@ -97,6 +100,7 @@ static unsigned char transition_state_1GHZ[][2] = {
         {5, 2}, // ->600mhz
         {6, 3}, // ->400mhz
         {7, 4}, // ->200mhz
+		{8, 5}, // ->100mhz
 };
 
 /* frequency */
@@ -133,7 +137,7 @@ static struct cpufreq_frequency_table *s5pc110_freq_table[] = {
 
 static unsigned int s5pc110_thres_table_1GHZ[][2] = {
       	{60, 80}, // 1.3ghz
-      	{60, 80}, // 1.2ghz
+		{60, 80}, // 1.2ghz
       	{60, 80}, // 1.0ghz
         {50, 90}, // 800mhz
         {50, 90}, // 600mhz
@@ -406,7 +410,11 @@ int s5pc110_pm_target(unsigned int target_freq)
                 printk("frequency scaling error\n");
                 return -EINVAL;
         }
-
+#if 1
+	/*change the frequency threshold level*/
+	store_up_down_threshold(s5pc110_thres_table[S5PC11X_FREQ_TAB][index][0], 
+				s5pc110_thres_table[S5PC11X_FREQ_TAB][index][1]);
+#endif
         return ret;
 }
 
@@ -459,8 +467,6 @@ unsigned int s5pc110_getspeed(unsigned int cpu)
 }
 
 extern void print_clocks(void);
-extern int store_up_down_threshold(unsigned int down_threshold_value,
-				unsigned int up_threshold_value);
 extern void dvs_set_for_1dot2Ghz (int onoff);
 extern bool gbTransitionLogEnable;
 static int s5pc110_target(struct cpufreq_policy *policy,
@@ -620,7 +626,7 @@ static int s5pc110_target(struct cpufreq_policy *policy,
 
 	mpu_clk->rate = freqs.new * KHZ_T;
 
-#if 0 // not using it as of now
+#if 1 // not using it as of now
 	/*change the frequency threshold level*/
 	store_up_down_threshold(s5pc110_thres_table[S5PC11X_FREQ_TAB][index][0], 
 				s5pc110_thres_table[S5PC11X_FREQ_TAB][index][1]);
@@ -772,7 +778,7 @@ static struct cpufreq_driver s5pc110_driver = {
 	.get		= s5pc110_getspeed,
 	.init		= s5pc110_cpu_init,
 	.name		= "s5pc110",
-	.attr    	= s5pc110_cpufreq_attr,
+	.attr		= s5pc110_cpufreq_attr,
 };
 
 static int __init s5pc110_cpufreq_init(void)
