@@ -29,8 +29,8 @@
  * It helps to keep variable names smaller, simpler
  */
 
-#define DEF_FREQUENCY_UP_THRESHOLD		(70)
-#define DEF_FREQUENCY_DOWN_THRESHOLD		(30)
+#define DEF_FREQUENCY_UP_THRESHOLD		(80)
+#define DEF_FREQUENCY_DOWN_THRESHOLD		(20)
 
 #ifdef CONFIG_CPU_S5PV210
 #define DEF_SAMPLING_FREQ_STEP  20
@@ -280,6 +280,23 @@ static ssize_t store_down_threshold(struct cpufreq_policy *unused,
 	return count;
 }
 
+int store_up_down_threshold(unsigned int down_threshold_value,
+				unsigned int up_threshold_value)
+{
+	//printk("low_threshold_level = %d up_threshold_level = %d \n",
+	//			down_threshold_value,up_threshold_value);
+	if(down_threshold_value > 100 || up_threshold_value > 100
+		|| down_threshold_value > up_threshold_value)
+	{
+		printk(KERN_ERR "Invalid input values");
+		return -EINVAL;
+	}	
+	dbs_tuners_ins.down_threshold = down_threshold_value;
+	dbs_tuners_ins.up_threshold = up_threshold_value;
+	return 0;	
+}
+
+
 static ssize_t store_ignore_nice_load(struct cpufreq_policy *policy,
 		const char *buf, size_t count)
 {
@@ -371,7 +388,9 @@ extern int dvfs_change_quick;
 static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 {
 	unsigned int load = 0;
+#ifndef CONFIG_CPU_S5PV210
 	unsigned int freq_target;
+#endif
 
 	struct cpufreq_policy *policy;
 	unsigned int j;
@@ -478,8 +497,8 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 	 * policy. To be safe, we focus 10 points under the threshold.
 	 */
 	if (load < (dbs_tuners_ins.down_threshold - 10)) {
-		freq_target = (dbs_tuners_ins.freq_step * policy->max) / 100;
 #ifndef CONFIG_CPU_S5PV210
+		freq_target = (dbs_tuners_ins.freq_step * policy->max) / 100;
 		this_dbs_info->requested_freq -= freq_target;
 #else
 		this_dbs_info->requested_freq = s5pc11x_target_frq(this_dbs_info->requested_freq, -1);

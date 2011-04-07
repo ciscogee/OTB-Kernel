@@ -42,7 +42,7 @@
 #define PMIC_INT		1
 #define PMIC_BOTH		2
 
-#define DECREASE_DVFS_DELAY
+// #define DECREASE_DVFS_DELAY
 
 #ifdef DECREASE_DVFS_DELAY
 #define PMIC_SET_MASK   (0x38) //(0x7 << 3)
@@ -50,9 +50,9 @@
 #define PMIC_SET2_BIT   (0x10) //(0x1 << 4)
 #define PMIC_SET3_BIT   (0x20) //(0x1 << 5)
 #else
-#define PMIC_ARM_MASK		(0x3 << 3)
-#define PMIC_SET1_HIGH		(0x1 << 3)
-#define PMIC_SET2_HIGH		(0x1 << 4)
+#define PMIC_ARM_MASK		(0x18) // (0x3 << 3)
+#define PMIC_SET1_HIGH		(0x8) // (0x1 << 3)
+#define PMIC_SET2_HIGH		(0x10) // (0x1 << 4)
 #endif
 
 #ifndef CONFIG_CPU_FREQ
@@ -86,10 +86,13 @@ enum PMIC_VOLTAGE {
 static const unsigned int frequency_match_1GHZ[][4] = {
 /* frequency, Mathced VDD ARM voltage , Matched VDD INT*/
 #if 1
-        {1000000, 1275, 1100, 0},
-        {800000, 1250, 1100, 1},
-        {400000, 1050, 1100, 2},
-        {200000, 950, 1100, 4},
+        {1300000, 1325, 1125, 0},
+        {1200000, 1325, 1125, 0},
+        {1000000, 1200, 1125, 1},
+        {800000, 1200, 1125, 2},
+        {600000, 1100, 1125, 2},
+        {400000, 1100, 1125, 2},
+        {200000, 950, 1000, 4},
         {100000, 950, 1000, 5},
 #else //just for dvs test
         {1000000, 1250, 1100, 0},
@@ -114,10 +117,10 @@ const unsigned int (*frequency_match[2])[4] = {
 
 #if 0
 /*  voltage table */
-static const unsigned int voltage_table[16] = {
-	750, 800, 850, 900, 950, 1000, 1050,
-	1100, 1150, 1200, 1250, 1300, 1350,
-	1400, 1450, 1500
+static const unsigned int voltage_table[28] = {
+	750, 800, 850, 900, 925, 950, 975, 1000, 1025, 1050,
+	1075, 1100, 1125, 1150, 1175, 1200, 1225, 1250, 1275,
+	1300, 1325, 1350, 1375, 1400, 1425, 1450, 1475, 1500
 };
 #endif
 
@@ -127,6 +130,8 @@ extern unsigned int S5PC11X_FREQ_TAB;
 static struct regulator *Reg_Arm = NULL, *Reg_Int = NULL;
 
 static unsigned int s_arm_voltage=0, s_int_voltage=0;
+
+unsigned long set1_gpio, set2_gpio, set3_gpio;
 
 #ifndef DECREASE_DVFS_DELAY
 /*only 4 Arm voltages and 2 internal voltages possible*/
@@ -141,14 +146,14 @@ static const unsigned int dvs_volt_table_800MHZ[][3] = {
 };
 
 static const unsigned int dvs_volt_table_1GHZ[][3] = {
-        {L0, DVSARM1, DVSINT1},//DVSINT0
-        {L1, DVSARM2, DVSINT1},
-        {L2, DVSARM3, DVSINT1},
- //266       {L3, DVSARM3, DVSINT1},
-        {L3, DVSARM4, DVSINT1},
-        {L4, DVSARM4, DVSINT2},
-//        {L5, DVSARM4, DVSINT2},
-//        {L6, DVSARM4, DVSINT2},
+        {L0, DVSARM1, DVSINT1}, // 1.3ghz
+        {L1, DVSARM1, DVSINT1}, // 1.2ghz
+        {L2, DVSARM2, DVSINT1}, // 1.0ghz
+        {L3, DVSARM2, DVSINT1}, // 800mhz
+        {L4, DVSARM3, DVSINT1}, // 600mhz
+        {L5, DVSARM3, DVSINT1}, // 400mhz
+        {L6, DVSARM4, DVSINT2}, // 200mhz
+        {L7, DVSARM4, DVSINT2}, // 100mhz
 };
 
 
@@ -158,11 +163,11 @@ const unsigned int (*dvs_volt_table[2])[3] = {
 };
 
 static const unsigned int dvs_arm_voltage_set[][2] = {
-	{DVSARM1, 1275},
+	{DVSARM1, 1325},
 	{DVSARM2, 1200},
-	{DVSARM3, 1050},
+	{DVSARM3, 1100},
 	{DVSARM4, 950},
-	{DVSINT1, 1100},
+	{DVSINT1, 1125},
 	{DVSINT2, 1000},
 };
 #endif
@@ -183,8 +188,9 @@ static int set_max8998(unsigned int pwr, enum perf_level p_lv)
 			return ret;
 
 		pmic_val = voltage * 1000;
-		
-		DBG("regulator_set_voltage =%d\n",voltage);
+
+		DBG("regulator_set_voltage =%dmA @ %dMHz-%d UV=%d\n",voltage,frequency_match_tab[p_lv][pwr]/1000,p_lv,exp_UV_mV[p_lv]);
+
 		/*set Arm voltage*/
 		ret = regulator_set_voltage(Reg_Arm,pmic_val,pmic_val);
 	        if(ret != 0)
@@ -256,8 +262,8 @@ EXPORT_SYMBOL_GPL(set_pmic_gpio);
 
 int set_voltage(enum perf_level p_lv)
 {
-	DBG("%s : p_lv = %d\n", __FUNCTION__, p_lv);
-	if(step_curr != p_lv) 
+//	DBG("%s : p_lv = %d\n", __FUNCTION__, p_lv);
+	if(step_curr != p_lv)
 	{
 		/*Commenting gpio initialisation*/
 		//set_pmic_gpio();
@@ -277,19 +283,54 @@ int set_gpio_dvs(enum perf_level p_lv)
 	switch(p_lv)
     {
         case L0:
-            writel(((readl(S5PV210_GPH0DAT) & ~PMIC_SET_MASK)                                                ), S5PV210_GPH0DAT);
+            //writel(((readl(S5PV210_GPH0DAT) & ~PMIC_SET_MASK)                                                ), S5PV210_GPH0DAT);
+            //BUCK_1_EN_A disabled
+            gpio_set_value(S5PV210_GPB(6),0);
+            // BUCK_1_EN_B disabled
+            gpio_set_value(S5PV210_GPB(3),0);
+            //BUCK_2_EN disabled
+            gpio_set_value(S5PV210_GPB(7),0);
+            
             break;
         case L1:
-            writel(((readl(S5PV210_GPH0DAT) & ~PMIC_SET_MASK) | PMIC_SET1_BIT                                ), S5PV210_GPH0DAT);
+           // writel(((readl(S5PV210_GPH0DAT) & ~PMIC_SET_MASK) | PMIC_SET1_BIT                                ), S5PV210_GPH0DAT);
+            //BUCK_1_EN_A enabled
+            gpio_set_value(S5PV210_GPB(6),1);
+            // BUCK_1_EN_B disabled
+            gpio_set_value(S5PV210_GPB(3),0);
+            //BUCK_2_EN disabled
+            gpio_set_value(S5PV210_GPB(7),0);
+           
             break;
         case L2:
-            writel(((readl(S5PV210_GPH0DAT) & ~PMIC_SET_MASK)                 | PMIC_SET2_BIT                ), S5PV210_GPH0DAT);
+            //writel(((readl(S5PV210_GPH0DAT) & ~PMIC_SET_MASK)                 | PMIC_SET2_BIT                ), S5PV210_GPH0DAT);
+             //BUCK_1_EN_A disabled
+            gpio_set_value(S5PV210_GPB(6),0);
+            // BUCK_1_EN_B enabled
+            gpio_set_value(S5PV210_GPB(3),1);
+            //BUCK_2_EN disabled
+            gpio_set_value(S5PV210_GPB(7),0);
             break;
         case L3:
-            writel(((readl(S5PV210_GPH0DAT) & ~PMIC_SET_MASK) | PMIC_SET1_BIT | PMIC_SET2_BIT                ), S5PV210_GPH0DAT);
+           // writel(((readl(S5PV210_GPH0DAT) & ~PMIC_SET_MASK) | PMIC_SET1_BIT | PMIC_SET2_BIT                ), S5PV210_GPH0DAT);
+             //BUCK_1_EN_A enabled
+            gpio_set_value(S5PV210_GPB(6),1);
+            // BUCK_1_EN_B enabled
+            gpio_set_value(S5PV210_GPB(3),1);
+            //BUCK_2_EN disabled
+            gpio_set_value(S5PV210_GPB(7),0);
             break;
         case L4:
-            writel(((readl(S5PV210_GPH0DAT) & ~PMIC_SET_MASK) | PMIC_SET1_BIT | PMIC_SET2_BIT | PMIC_SET3_BIT), S5PV210_GPH0DAT);
+        case L5:
+        case L6:
+        case L7:
+            //writel(((readl(S5PV210_GPH0DAT) & ~PMIC_SET_MASK) | PMIC_SET1_BIT | PMIC_SET2_BIT | PMIC_SET3_BIT), S5PV210_GPH0DAT);
+             //BUCK_1_EN_A enabled
+            gpio_set_value(S5PV210_GPB(6),1);
+            // BUCK_1_EN_B enabled
+            gpio_set_value(S5PV210_GPB(3),1);
+            //BUCK_2_EN enabled
+            gpio_set_value(S5PV210_GPB(7),1);
             break;
         default:
             pr_err("[PWR] %s : Invalid parameters (%d)\n", __func__, p_lv);
@@ -303,45 +344,34 @@ int set_gpio_dvs(enum perf_level p_lv)
 #else
 int set_gpio_dvs(int armSet)
 {
-	unsigned int curPmicArm = readl(S5PV210_GPH0DAT);
 	DBG("set dvs with %d\n", armSet);
-	switch(armSet) {
-	case DVSARM1:
-		curPmicArm = curPmicArm & ~(PMIC_ARM_MASK); //set GPH0[3],GPH0[4] low
-		writel(curPmicArm,S5PV210_GPH0DAT);
-		//gpio_set_value(GPIO_BUCK_1_EN_A, 0);
-		//gpio_set_value(GPIO_BUCK_1_EN_B, 0);
-		break;
-	case DVSARM2:
-		curPmicArm = (curPmicArm & ~(PMIC_ARM_MASK)) | PMIC_SET1_HIGH; //set GPH0[3] high, GPH0[4] low
-		writel(curPmicArm,S5PV210_GPH0DAT);
-		//gpio_set_value(GPIO_BUCK_1_EN_B, 0);
-		//gpio_set_value(GPIO_BUCK_1_EN_A, 1);
-		break;
-	case DVSARM3:
-		curPmicArm = (curPmicArm & ~(PMIC_ARM_MASK)) | PMIC_SET2_HIGH; //set GPH0[3] low, GPH0[4] high
-		writel(curPmicArm,S5PV210_GPH0DAT);		
-		//gpio_set_value(GPIO_BUCK_1_EN_A, 0);
-		//gpio_set_value(GPIO_BUCK_1_EN_B, 1);
-		break;
-	case DVSARM4:
-		curPmicArm = (curPmicArm & ~(PMIC_ARM_MASK)) | PMIC_SET1_HIGH | PMIC_SET2_HIGH; //set GPH0[3],GPH0[4] high
-		writel(curPmicArm,S5PV210_GPH0DAT);	
-		//gpio_set_value(GPIO_BUCK_1_EN_A, 1);
-		//gpio_set_value(GPIO_BUCK_1_EN_B, 1);
-		break;
-	case DVSINT1:
-		gpio_set_value(GPIO_BUCK_2_EN, 0);
-		break;
-	case DVSINT2:
-		gpio_set_value(GPIO_BUCK_2_EN, 1);
-		break;
-	default:
-		printk("Invalid parameters to %s\n",__FUNCTION__);
+		switch(armSet) {
+		case DVSARM1:
+			gpio_set_value(set1_gpio, 0);
+			gpio_set_value(set2_gpio, 0);
+			break;
+		case DVSARM2:
+			gpio_set_value(set2_gpio, 0);
+			gpio_set_value(set1_gpio, 1);
+			break;
+		case DVSARM3:
+			gpio_set_value(set1_gpio, 0);
+			gpio_set_value(set2_gpio, 1);
+			break;
+		case DVSARM4:
+			gpio_set_value(set1_gpio, 1);
+			gpio_set_value(set2_gpio, 1);
+			break;
+		case DVSINT1:
+			gpio_set_value(set3_gpio, 0);
+			break;
+		case DVSINT2:
+			gpio_set_value(set3_gpio, 1);
+			break;
+		default:
+			printk("Invalid parameters to %s\n",__FUNCTION__);
 		return -EINVAL;
-	}
-
-	DBG("S5PV210_GPH0CON=%x,S5PV210_GPH0DAT=%x,S5PV210_GPH0PUD=%x\n",readl(S5PV210_GPH0CON),readl(S5PV210_GPH0DAT),readl(S5PV210_GPH0PUD));
+		}
 
 	return 0;
 }
@@ -372,7 +402,7 @@ int set_voltage_dvs(enum perf_level p_lv)
 	set_gpio_dvs(p_lv);
 	udelay(delay);
 
-	DBG("[PWR] %s : level (%d -> %d), delay (%u)\n", __func__, step_curr, p_lv, delay);
+	DBG("[PWR] %s : level (%d -> %d), delay (%u)\n", __func__, frequency_match_tab[step_curr][0], frequency_match_tab[p_lv][0], delay);
 
 	step_curr = p_lv;
 

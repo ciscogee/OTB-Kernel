@@ -1,6 +1,6 @@
 #!/bin/bash
 
-tag=OTB-TW
+tag=OTB-OC-TW
 
 WORK=`pwd`
 cd ..
