@@ -9,6 +9,7 @@ loglevel 3
     export PATH /sbin:/system/sbin:/system/bin:/system/xbin
     export LD_LIBRARY_PATH /system/lib:/system/lib/egl
     export ANDROID_BOOTLOGO 1
+    export ANDROID_CACHE /cache
     export ANDROID_ROOT /system
     export ANDROID_ASSETS /system/app
     export ANDROID_DATA /data
@@ -18,20 +19,17 @@ loglevel 3
     export TMPDIR /data/local/tmp
     export TERMINFO /system/etc/terminfo
 
+
 # Backward compatibility
     symlink /system/etc /etc
+    symlink /sys/kernel/debug /d
 
 # Stroke my ego
-        setprop ro.build.display.id "OTB - TW"
+        setprop ro.build.display.id "OTB - AOSP"
 	
 # to enable wifi
      setprop wifi.interface "eth0"
 # end of wifi
-	
-# +++++++++++++++++++++++++++++++++++++++++++
-# bootsnd
-    setprop audioflinger.bootsnd 1
-# end of bootsnd
 
 # Insert all modules here
     mkdir /lib/modules
@@ -49,14 +47,24 @@ loglevel 3
 	insmod /lib/modules/dpram.ko
 	insmod /lib/modules/multipdp.ko
 	insmod /lib/modules/drop_caches.ko
-	insmod /lib/modules/hotspot_event_monitoring.ko
+        insmod /lib/modules/hotspot_event_monitoring.ko
 
-# create mountpoints and mount tmpfs on sqlite_stmt_journals
+# create mountpoints
     mkdir /mnt 0775 root system
     mkdir /mnt/sdcard 0000 system system
 
-     # Backwards Compat - XXX: Going away in G*
+# Create cgroup mount point for cpu accounting
+    mkdir /acct
+    mount cgroup none /acct cpuacct
+    mkdir /acct/uid
+
+# Backwards Compat - XXX: Going away in G*
     symlink /mnt/sdcard /sdcard
+
+    mkdir /system
+    mkdir /data 0771 system system
+    mkdir /cache 0771 system cache
+    mkdir /config 0500 root root
 
     # Directory for putting things only root should see.
     mkdir /mnt/secure 0700 root root
@@ -72,38 +80,16 @@ loglevel 3
     mkdir /mnt/asec  0700 root system
     mount tmpfs tmpfs /mnt/asec mode=0755,gid=1000
 
-    mkdir /system
-    mkdir /data 0771 system system
-    chown system system /data
-    chmod 0771 /data
-
-    mkdir /efs 0771 system system
-    chown system system /efs
-    chmod 0771 /efs
-    mkdir /cache 0770 system cache
-    chown system cache /cache
-    chmod 0770 /cache
-    mkdir /config 0500 root root
-    chown root root /config
-    chmod 0500 /config
-    mkdir /sqlite_stmt_journals 01777 root root
-    chown root root /sqlite_stmt_journals
-    chmod 01777 /sqlite_stmt_journals
-    mount tmpfs tmpfs /sqlite_stmt_journals size=4m
-
-###################################################################    
-# create SEC_INTERNAL_STORAGE 1/2   
-    mkdir /userdata 0771 system system
-    chown system system /userdata
-    chmod 0771 /userdata
-###################################################################
-
     write /proc/sys/kernel/panic_on_oops 1
     write /proc/sys/kernel/hung_task_timeout_secs 0
     write /proc/cpu/alignment 4
     write /proc/sys/kernel/sched_latency_ns 10000000
     write /proc/sys/kernel/sched_wakeup_granularity_ns 2000000
     write /proc/sys/kernel/sched_compat_yield 1
+    write /proc/sys/kernel/sched_child_runs_first 0
+
+    # Voodoo here
+    write /sys/devices/system/cpu/cpu0/cpufreq/conservative/sampling_rate 125000
 
 # Create cgroup mount points for process groups
     mkdir /dev/cpuctl
@@ -123,74 +109,50 @@ loglevel 3
     chmod 0777 /dev/cpuctl/bg_non_interactive/tasks
     write /dev/cpuctl/bg_non_interactive/cpu.shares 52
 
+    chmod 0777 /dev/snd/controlC0
+    chmod 0777 /dev/snd/controlC1
+    chmod 0777 /dev/snd/pcmC0D0c
+    chmod 0777 /dev/snd/pcmC0D0p
+    chmod 0777 /dev/snd/pcmC1D0c
+    chmod 0777 /dev/snd/pcmC1D0d
+    chmod 0777 /dev/snd/timer   
+
+# mount mtd partitions
     mount rfs /dev/block/stl9 /system check=no
     mount ext4 /dev/block/stl9 /system wait noatime nosuid nodev
 
-###################################################################    
-# create SEC_INTERNAL_STORAGE 1/3   
-    mount rfs /dev/block/mmcblk0p1 /data nosuid nodev noauto_da_alloc check=no
+    mount rfs /dev/block/mmcblk0p1 /data nosuid nodev check=no
     mount ext4 /dev/block/mmcblk0p1 /data wait noatime nosuid nodev
     chown system system /data
     chmod 0771 /data
-   
-###################################################################  
 
-###################################################################    
-# create dbdata partition
-mkdir /dbdata
-mount rfs /dev/block/stl10 /dbdata nosuid nodev check=no
-mount ext4 /dev/block/stl10 /dbdata wait noatime nosuid nodev
-mkdir /dbdata/databases
-chown system system /dbdata
-chown system system /dbdata/databases
-chmod 0771 /dbdata
-chmod 0777 /dbdata/databases   
-###################################################################  
+    # Create dump dir and collect dumps.
+    # Do this before we mount cache so eventually we can use cache for
+    # storing dumps on platforms which do not have a dedicated dump partition.
 
-    mkdir /data/fota 0771 system system
-    chown system system /data/fota
-    chmod 0771 /data/fota
+    mkdir /data/dontpanic
+    chown root log /data/dontpanic
+    chmod 0750 /data/dontpanic
 
-#Thomas Ryu, fota partition
-###################################################################    
-# create SEC_INTERNAL_STORAGE 2/3   
-    mount rfs /dev/block/mmcblk0p2 /data/fota nosuid nodev check=no
-    chown system system /data/fota
-    chmod 0771 /data/fota
-   
-###################################################################  
+    # Collect apanic data, free resources and re-arm trigger
+    copy /proc/apanic_console /data/dontpanic/apanic_console
+    chown root log /data/dontpanic/apanic_console
+    chmod 0640 /data/dontpanic/apanic_console
 
-    mkdir /preinstall 0771 system system
-    chown system system /preinstall
-    chmod 0771 /preinstall
+    copy /proc/apanic_threads /data/dontpanic/apanic_threads
+    chown root log /data/dontpanic/apanic_threads
+    chmod 0640 /data/dontpanic/apanic_threads
 
-#Thomas Ryu, fota partition
-###################################################################    
-# create SEC_INTERNAL_STORAGE 3/3   
-    mount rfs /dev/block/mmcblk0p3 /preinstall nosuid nodev check=no
-    chown system system /preinstall
-    chmod 0771 /preinstall
-   
-###################################################################  
+    write /proc/apanic_console 1
 
     # Same reason as /data above
     mount rfs /dev/block/stl11 /cache nosuid nodev check=no
     mount ext4 /dev/block/stl11 /cache wait noatime nosuid nodev
     chown system cache /cache
-    chmod 0770 /cache
-
-    # cache folder for bigger file than /cache
-    mkdir /data/cache
-    chown system cache /data/cache
-    chmod 0770 /data/cache
-
-    #INNOPATH
-    mkdir /cache/recovery 0770
-    mkdir /cache/recovery/fota 0771
-    chown root root /cache/recovery/fota
-    chmod 0771 /cache/recovery/fota
+    chmod 0771 /cache
 
     # This may have been created by the recovery system with odd permissions
+    mkdir /cache/recovery 0770
     chown system system /cache/recovery
     chmod 0770 /cache/recovery
 
@@ -198,19 +160,24 @@ chmod 0777 /dbdata/databases
     chown root log /proc/vmallocinfo
     chmod 0440 /proc/vmallocinfo
     
-    mount rfs /dev/block/stl3 /efs nosuid nodev check=no
-	#removed by khoonk for parameter reading on 20100321
-	#removed by khoonk for parameter reading on 20100321
-
-    chown radio radio /efs
-    chmod 0771 /efs
+    #change permissions on kmsg & sysrq-trigger so bugreports can grab kthread stacks
+    chown root system /proc/kmsg
+    chmod 0440 /proc/kmsg
+    chown root system /proc/sysrq-trigger
+    chmod 0220 /proc/sysrq-trigger
 
 # create data/gps for GPS demon
-	mkdir /data/gps
-	chown system /data/gps
-	chmod 771 /data/gps
-# GPS development for broadcom.    
-    chmod 600 /system/etc/secgps.conf
+    chown root system /dev/s3c2410_serial1
+    chmod 664 /dev/s3c2410_serial1
+    mkdir /data/gps 771 system system
+    chown system system /data/gps
+    chmod 771 /data/gps
+    chown root system /sys/class/sec/gps/GPS_PWR_EN/value
+    chmod 664 /sys/class/sec/gps/GPS_PWR_EN/value
+    chown root system /sys/class/gpio/gpio121/value
+    chmod 664 /sys/class/gpio/gpio121/value
+    chown root system /sys/class/gpio/gpio120/value
+    chmod 664 /sys/class/gpio/gpio120/value
     
 # create basic filesystem structure
     mkdir /data/misc 01771 system misc
@@ -222,10 +189,13 @@ chmod 0777 /dbdata/databases
     mkdir /data/misc/bluetooth 0777 bluetooth bluetooth
     chown bluetooth bluetooth /data/misc/bluetooth
     chmod 0777 /data/misc/bluetooth
+    mkdir /data/misc/bluetoothd 0777 bluetooth bluetooth
+    chown bluetooth bluetooth /data/misc/bluetoothd
+    chmod 0777 /data/misc/bluetoothd
     mkdir /data/misc/keystore 0770 keystore keystore
     chown keystore keystore /data/misc/keystore
     chmod 0770 /data/misc/keystore
-    mkdir /data/misc/systemkeys 0700 system system	
+    mkdir /data/misc/systemkeys 0700 system system
     mkdir /data/misc/vpn 0770 system system
     chown system system /data/misc/vpn
     chmod 0770 /data/misc/vpn
@@ -253,6 +223,14 @@ chmod 0777 /dbdata/databases
     chmod 0664 /system/etc/wifi/wpa_supplicant.conf
 # end of wifi
 
+#camera fix thanks skeeterslint
+    chmod 666 /dev/video0
+    chmod 666 /dev/video1
+    chmod 666 /dev/video14
+    chmod 666 /dev/video2
+    chmod 666 /dev/video21
+    chmod 666 /dev/video22
+
     mkdir /data/local 0771 shell shell
     chown shell shell /data/local
     chmod 0771 /data/local
@@ -276,12 +254,11 @@ chmod 0777 /dbdata/databases
     mkdir /data/log  0777 root root 
     chmod 0777 /data/log
 	chmod 0777 /data/anr	
-    
-    chmod 0662 /dev/log/events
-    chmod 0662 /dev/log/system
+
     chmod 0662 /dev/log/radio
     chmod 0662 /dev/log/main
-    	
+    chmod 0662 /dev/log/event   
+	
    	# create dump camera
     mkdir /data/dump  0777 root root 
     chmod 0777 /data/dump
@@ -290,6 +267,11 @@ chmod 0777 /dbdata/databases
     mkdir /data/dalvik-cache 0771 system system
     chown system system /data/dalvik-cache
     chmod 0771 /data/dalvik-cache
+
+    # cache/dalvik-cache for froyo
+    symlink /data/dalvik-cache /cache/dalvik-cache
+    chown system system /cache/dalvik-cache
+    chmod 0771 /cache/dalvik-cache
 
     # create the lost+found directories, so as to enforce our permissions
     mkdir /data/lost+found 0770
@@ -301,38 +283,18 @@ chmod 0777 /dbdata/databases
     chown root root /cache/lost+found
     chmod 0770 /cache/lost+found
   
+    # allow net_raw to have access to /dev/socket directory
+    chown root net_raw /dev/socket
+    chmod 0775 /dev/socket
+
     # permissions for MTP device node
-    chmod 0660 /dev/usb_mtp_gadget
-    # Vova: permissions for enable MTP node
-    chmod 0777 /dev/usb_mtp_enable 
-
-    #DRM directory creation
-    mkdir /system/etc/security/drm 0777
-    chown root root /system/etc/security/drm
-    chmod 0777 /system/etc/security/drm
-    #Permission for WMDRM sample.hds file
-    chmod 0777  /system/etc/security/drm/sample.hds
-   # Added for testing WMDRM and DIVX DRM
-    mkdir /data/data/.drm/ 0777
-    mkdir /data/data/.drm/.wmdrm 0777
-    mkdir /data/data/.drm/.divxdrm 0777
-    
-    # Permission for WMDRM sample.hds file
-    chmod 0777  /data/data/.drm/.wmdrm/sample.hds
- 
-    # Added for path change for generated certificates adn hds file for playready.
-    mkdir /data/data/.drm/.playready 0777
-
-    # video play for m.youtube.com
-     mkdir /data/data/.youtube 0777
+    chmod 0777 /dev/usb_mtp_gadget
 
     # ko files for 3D
     insmod /lib/modules/pvrsrvkm.ko
     insmod /lib/modules/s3c_lcd.ko
     insmod /lib/modules/s3c_bc.ko
 
-    # load FM Radio module
-    insmod /lib/modules/Si4709_driver.ko
     insmod /lib/modules/vibrator.ko
     insmod /lib/modules/melfas_touchkey.ko
 
@@ -340,6 +302,8 @@ chmod 0777 /dbdata/databases
     insmod /lib/modules/tun.ko
     insmod /lib/modules/cifs.ko
 
+    chmod 0662 /dev/log/events
+    chmod 0662 /dev/log/system
 on boot
 # basic network init
     ifup lo
@@ -348,9 +312,6 @@ on boot
 
 # set RLIMIT_NICE to allow priorities from 19 to -20
     setrlimit 13 40 40
-
-# Set timeout value for rmnet stats.
-    write /sys/devices/virtual/net/rmnet0/timeout_suspend 5000000
 
 # Define the oom_adj values for the classes of processes that can be
 # killed by the kernel.  These are used in ActivityManagerService.
@@ -370,9 +331,9 @@ on boot
     setprop ro.SECONDARY_SERVER_MEM 6144
     setprop ro.BACKUP_APP_MEM 6144
     setprop ro.HOME_APP_MEM 6144
-    setprop ro.HIDDEN_APP_MEM 10240
-    setprop ro.CONTENT_PROVIDER_MEM 11264
-    setprop ro.EMPTY_APP_MEM 12288
+    setprop ro.HIDDEN_APP_MEM 11264
+    setprop ro.CONTENT_PROVIDER_MEM 13312
+    setprop ro.EMPTY_APP_MEM 16384
 
 # Write value must be consistent with the above properties.
 # Note that the driver only supports 6 slots, so we have HOME_APP at the
@@ -381,14 +342,14 @@ on boot
 
     write /proc/sys/vm/overcommit_memory 1
     write /proc/sys/vm/min_free_order_shift 4
-	write /sys/module/lowmemorykiller/parameters/minfree 2560,4096,6144,10240,11264,12288
+    write /sys/module/lowmemorykiller/parameters/minfree 2560,4096,6144,11264,13312,16384
 
     # Set init its forked children's oom_adj.
     write /proc/1/oom_adj -16
 
     # Tweak background writeout
-    write /proc/sys/vm/dirty_expire_centisecs 200
-    write /proc/sys/vm/dirty_background_ratio  5
+    write /proc/sys/vm/dirty_expire_centisecs 800
+    write /proc/sys/vm/dirty_background_ratio 2
 
    # permissions 
 
@@ -426,6 +387,7 @@ on boot
     chown system system /sys/class/leds/red/device/grpfreq
     chown system system /sys/class/leds/red/device/grppwm
     chown system system /sys/class/leds/red/device/blink
+    chown system system /sys/class/timed_output/vibrator/enable
     chown system system /sys/module/sco/parameters/disable_esco
     chown system system /sys/kernel/ipv4/tcp_wmem_min
     chown system system /sys/kernel/ipv4/tcp_wmem_def
@@ -437,11 +399,32 @@ on boot
     chown system system /sys/class/recovery/recovery/wipedata
     chmod 0777 /sys/class/recovery/recovery/wipedata
 
-# FOTA
-    chmod 0777 /system/etc/install-recovery.sh
+# for Sensor HAL
+
+    chown system system /dev/accelerometer
+    chown system system /dev/akm8973_daemon
+    chown system system /dev/akm8973_aot
+    chown system system /dev/light
+    chmod 0777 /dev/accelerometer
+    chmod 0777 /dev/akm8973_daemon
+    chmod 0777 /dev/akm8973_aot
+    chmod 0777 /dev/light
+
+#magnetic sensor yamaha
+    chown compass system /dev/i2c-12
+    chmod 0777 /dev/i2c-12
+    chown compass system /dev/i2c-5
+    chmod 0777 /dev/yamaha_compass
+    chown system system /dev/light
+    chmod 0777 /dev/light
+    chown system system /dev/proximity
+    chmod 0777 /dev/accelerometer
+    chmod 0777 /dev/akm8973_daemon
+    chmod 0777 /dev/akm8973_aot
+    chmod 0777 /dev/proximity
 
 #hwcodec tuning ( rakesh.gohel@samsung.com )
-   chmod 660 /dev/i2c-4
+   chmod 777 /dev/i2c-4
 
    chmod 0777 /system/etc/audio/eqfilter.txt
    chmod 0777 /system/etc/audio/lmfilter.txt
@@ -462,8 +445,6 @@ on boot
     setprop net.tcp.buffersize.edge    4093,26280,35040,4096,16384,35040
     setprop net.tcp.buffersize.gprs    4092,8760,11680,4096,8760,11680
 
-# +++++++++++++++++++++++++++++++++++++++++++
-
 #Define modem related settings
     setprop ro.radio.use-ppp yes
 # for Bluetooth
@@ -474,22 +455,16 @@ on boot
     chmod 0660 /proc/bluetooth/sleep/proto
 
     chown bluetooth bluetooth /dev/uinput
-    chmod 0660 /dev/uinput
+    chmod 0666 /dev/uinput
 
     chown bluetooth bluetooth /dev/s3c2410_serial0
-    chmod 0660 /dev/s3c2410_serial0
-    chmod 0770 /sys/class/rfkill/rfkill0/state
-    chmod 0770 /sys/class/rfkill/rfkill1/state
+    chmod 0666 /dev/s3c2410_serial0
+    chmod 0777 /sys/class/rfkill/rfkill0/state
+    chmod 0777 /sys/class/rfkill/rfkill1/state
     chown bluetooth bluetooth /sys/class/rfkill/rfkill0/state
     chown bluetooth bluetooth /sys/class/rfkill/rfkill1/state 
 
-    chmod 6771 /system/bin/brcm_dutMode
-#[ATLAS] start Modify STA disconnect event detect method (polling -> event) by jkjeon
-    chown system system /system/bin/softap_event
-    chmod 4775 /system/bin/softap_event
-#[ATLAS] end Modify STA disconnect event detect method (polling -> event) by jkjeon
-
-# +++++++++++++++++++++++++++++++++++++++++++
+    chmod 6777 /system/bin/brcm_dutMode
 
     class_start default
 
@@ -508,6 +483,7 @@ service otb /sbin/otb.sh
 
 # adbd is controlled by the persist.service.adb.enable system property
 service adbd /sbin/adbd
+    group shell log
     disabled
 
 # adbd on at boot in emulator
@@ -540,11 +516,6 @@ service vold /system/bin/vold
 
 write /sys/block/mmcblk0/bdi/read_ahead_kb 2048
 
-service notified_event /system/bin/notified_event
-    user system
-    group system
-    socket notified_event stream 0660 root system
-
 service netd /system/bin/netd
     socket netd stream 0660 root system
 
@@ -554,36 +525,28 @@ service ril-daemon /system/bin/rild
     socket rild stream 660 root radio
     socket rild-debug stream 660 radio system
     user root
-    group radio cache inet misc sdcard_rw log
+    group radio cache inet misc audio net_admin net_raw
+
+service glgps /system/bin/gpsd/glgps_samsungJupiter -c /system/etc/jupiter.xml
+    user root
+    group root
 
 service pppd_cdma /system/bin/pppd_runner
    user root
    group radio cache inet misc system
    disabled
    oneshot
-service DR-daemon /system/bin/drexe
-    user root
-    group system radio inet net_raw
-
-service mobex-daemon /system/bin/npsmobex
-	user system
-	group system inet log
 
 service zygote /system/bin/app_process -Xzygote /system/bin --zygote --start-system-server
     socket zygote stream 666
     onrestart write /sys/android_power/request_state wake
     onrestart write /sys/power/state on
+    onrestart restart media
 
 service media /system/bin/mediaserver
     user media
-    group system audio camera graphics inet net_bt net_bt_admin
-    
-#to prevent lockup issue during poweron/off test
-service killmediaserver /system/bin/killmediaserver
-    user media
-    group system
-    oneshot
-#to prevent lockup issue during poweron/off test
+    group system audio camera graphics inet net_bt net_bt_admin net_raw
+    ioprio rt 4
 
 service bootanim /system/bin/bootanimation
     user graphics
@@ -600,15 +563,7 @@ service dhcpcd /system/bin/dhcpcd eth0
    disabled
    oneshot
 
-service ifcfg_eth0 /system/bin/ifconfig eth0 up
-    disabled
-    oneshot
-
 #for WiFi MFG(TestMode)
-service mfgloader /system/bin/mfgloader
-    disabled
-    oneshot
-
 service wlservice /system/bin/wlservice
     disabled
     oneshot
@@ -616,39 +571,27 @@ service wlservice /system/bin/wlservice
 
 service dbus /system/bin/dbus-daemon --system --nofork
     socket dbus stream 660 bluetooth bluetooth
+    socket bluetooth stream 660 bluetooth bluetooth
+    socket dbus_bluetooth stream 660 bluetooth bluetooth
     user bluetooth
     group bluetooth net_bt_admin
 
 # +++++++++++++++++++++++++++++++++++++++++++
 # for Broadcom Bluetooth
  # Start BTLD -----------------------------------------
-service btld /system/bin/logwrapper /system/bin/btld -hb 3000000 -hp /dev/s3c2410_serial0 -lpm 1
+service hciattach /system/bin/brcm_patchram_plus -d --enable_hci --baudrate 3000000 --patchram /system/bin/BCM4329B1_002.002.023.0417.0430.hcd /dev/s3c2410_serial0
+    user bluetooth
+    group bluetooth net_bt_admin
+    disabled
+
+service bluetoothd /system/bin/logwrapper /system/bin/bluetoothd -n /system/etc/bluetooth/main.conf
     # init.rc does not yet support applying capabilities, so run as root and
     # let btld drop uid to bluetooth with the right linux capabilities
-    group bluetooth net_bt_admin
-    disabled
-    oneshot
-
-# Start DTUN OBEXD  -----------------------------------------
-service obexd /system/bin/logwrapper /system/bin/obexd
-    #socket bluetooth stream 660 bluetooth bluetooth
-    #socket dbus_bluetooth stream 660 bluetooth bluetooth
-    # init.rc does not yet support applying capabilities, so run as root and
-    # let obexd drop uid to bluetooth with the right linux capabilities
-    user root
-    group bluetooth net_bt_admin
-    disabled
-    oneshot
-
- # Start BLUETOOTHD  -----------------------------------------
-service bluetoothd /system/bin/logwrapper /system/bin/bluetoothd -n -d 
     socket bluetooth stream 660 bluetooth bluetooth
     socket dbus_bluetooth stream 660 bluetooth bluetooth
-    # init.rc does not yet support applying capabilities, so run as root and
-    # let bludtoothd drop uid to bluetooth with the right linux capabilities
     group bluetooth net_bt_admin misc
     disabled
-# +++++++++++++++++++++++++++++++++++++++++++
+# end bluetooth
 
 service hfag /system/bin/sdptool add --channel=10 HFAG
     user bluetooth
@@ -677,14 +620,14 @@ service installd /system/bin/installd
     socket installd stream 600 system system
 
 #magnetic sensor yamaha
-	service sensor-daemon /system/bin/sensorserver_yamaha
-	user compass
-	group system log
+service sensor-daemon /system/bin/sensorserver_yamaha
+user root
+group system
 
 service racoon /system/bin/racoon
     socket racoon stream 600 system system
     # racoon will setuid to vpn after getting necessary resources.
-    group net_admin keystore
+    group net_admin
     disabled
     oneshot
 
@@ -700,72 +643,28 @@ service keystore /system/bin/keystore /data/misc/keystore
     group keystore
     socket keystore stream 666
 
+service dumpstate /system/bin/dumpstate -s
+    socket dumpstate stream 0660 shell log
+    disabled
+    oneshot
+
 service immvibed /system/bin/immvibed 
     user shell
     group shell
 	oneshot
-
-service immvbsd /system/bin/immvbsd 
-	oneshot
-
-service softkeys /system/bin/softkeysapp
-    disabled
 
 # to enable wifi
 on property:init.svc.wpa_supplicant=stopped
     stop dhcpcd
 
 on property:init.svc.dhcpcd=stopped
-#    dhcpcd -k eth0
-# end of wifi
+#    dhcpd -k eth0
+#    start pppd_cdma
+#end of wifi
 
-# for Mobile AP
-service mobileAP /system/bin/wlp2pservice
+on property:net.cdma.data_ready=true
+    start pppd_cdma
 
-chmod 555 /system/etc/mobileap/enable_ppp.sh
-chmod 555 /system/etc/mobileap/enable_eth.sh
-chmod 555 /system/etc/mobileap/initialize_nat.sh
-chmod 555 /system/etc/mobileap/tethering_enable.sh
-
-# end of Mobile AP
-
-# for TvOut
-service tvout /system/bin/tvoutserver
-user system
-group system
-
-#PC Internet Share
-
-service udhcpd /system/bin/udhcpd /data/data/com.android.samsung.IcsService/dhcp/udhcpd.conf
-			disabled
-			oneshot
-
-#configure the Iptables
-service pcInternet_on /system/bin/sh /data/data/com.android.samsung.IcsService/conf/iptablesConfig.sh
-        disabled
-        oneshot
-        
-#flush the Iptables
-service pcInternet_off /system/bin/sh /data/data/com.android.samsung.IcsService/conf/iptablesFlush.sh
-        disabled
-        oneshot
-        
-on property:service.dhcp.enable=1
-	chmod 777 /data/data/com.android.samsung.IcsService/dhcp/udhcpd.conf
-	chmod 777 /data/data/com.android.samsung.IcsService/dhcp/udhcpd.leases
-	chmod 777 /data/data/com.android.samsung.IcsService/dhcp/udhcpd.pid	
-	start udhcpd 
-
-on property:service.iptables.configure=1
-	chmod 777 /data/data/com.android.samsung.IcsService/conf/iptablesConfig.sh
-	start pcInternet_on
-	
-on property:service.dhcp.enable=0
-	stop udhcpd
-
-on property:service.iptables.configure=0
-	chmod 777 /data/data/com.android.samsung.IcsService/conf/iptablesFlush.sh
-	start pcInternet_off 
-	
-#end of PCInternet share
+on property:net.cdma.data_ready=false
+    stop pppd_cdma
 
