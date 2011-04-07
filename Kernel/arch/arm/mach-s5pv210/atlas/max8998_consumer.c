@@ -241,6 +241,7 @@ static int set_max8998(unsigned int pwr, enum perf_level p_lv)
 
 void set_pmic_gpio(void)
 {
+	printk(KERN_ERR "lnt %s, start\n",__FUNCTION__);
 	/*set set1, set2, set3 of max8998 driver as 0*/
 	/* set GPH0(3), GPH0(4) & GPH0(5) as low*/
 	s3c_gpio_cfgpin(GPIO_BUCK_1_EN_A, S3C_GPIO_OUTPUT);
@@ -256,6 +257,7 @@ void set_pmic_gpio(void)
 	s3c_gpio_setpull(GPIO_BUCK_2_EN, S3C_GPIO_PULL_NONE);
 
 	s3c_gpio_setpull(GPIO_AP_PS_HOLD, S3C_GPIO_PULL_NONE);
+	printk(KERN_ERR "lnt %s, end\n",__FUNCTION__);
 }
 EXPORT_SYMBOL_GPL(set_pmic_gpio);
 
@@ -591,6 +593,28 @@ static int s3c_consumer_suspend(struct platform_device *dev, pm_message_t state)
 	//max8998_ldo_disable_direct(MAX8998_DCDC3);
 	max8998_ldo_disable_direct(MAX8998_DCDC2);
 	max8998_ldo_disable_direct(MAX8998_DCDC1);
+
+	  if(universal_sdhci2_detect_ext_cd()) //card not present
+	       {
+	            s3c_gpio_slp_cfgpin(S5PV210_GPG2(2),S3C_GPIO_SLP_OUT0);
+	       }
+	       else
+	       {
+	            unsigned int gpio;
+
+	            s3c_gpio_slp_cfgpin(S5PV210_GPG2(2),S3C_GPIO_SLP_OUT1 ); //tflash_enable
+
+	            s3c_gpio_slp_cfgpin(S5PV210_GPG2(0),S3C_GPIO_SFN(2) ); //tflash_clk
+	            s3c_gpio_slp_setpull_updown(S5PV210_GPG2(0), S3C_GPIO_PULL_UP);
+	            for (gpio = S5PV210_GPG2(1); gpio < S5PV210_GPG2(7); gpio++)
+	            {
+	                  if (gpio != S5PV210_GPG2(2))
+	                  {
+	        		    s3c_gpio_slp_cfgpin(gpio, S3C_GPIO_SFN(2));
+	        		    s3c_gpio_slp_setpull_updown(gpio, S3C_GPIO_PULL_NONE);
+	                 }
+		    }
+       }
 	return 0;
 }
 

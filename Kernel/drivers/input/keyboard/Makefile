@@ -51,7 +51,7 @@ obj-$(CONFIG_KEYPAD_MELFAS_TOUCH)                += melfas-touchkey.o
 obj-$(CONFIG_KEYPAD_MELFAS_TOUCH)                += melfas_download.o
 
 endif
-#obj-$(CONFIG_KEYPAD_CYPRESS_TOUCH)                += cypress/cypress-touchkey.o
-#obj-$(CONFIG_KEYPAD_CYPRESS_TOUCH)                += cypress/issp_driver_routines.o
-#obj-$(CONFIG_KEYPAD_CYPRESS_TOUCH)                += cypress/issp_main.o
-#obj-$(CONFIG_KEYPAD_CYPRESS_TOUCH)                += cypress/issp_routines.o
+obj-$(CONFIG_KEYPAD_CYPRESS_TOUCH)                += cypress/cypress-touchkey.o
+obj-$(CONFIG_KEYPAD_CYPRESS_TOUCH)                += cypress/issp_driver_routines.o
+obj-$(CONFIG_KEYPAD_CYPRESS_TOUCH)                += cypress/issp_main.o
+obj-$(CONFIG_KEYPAD_CYPRESS_TOUCH)                += cypress/issp_routines.o
