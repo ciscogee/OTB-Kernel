@@ -28,7 +28,7 @@ sync
 
 # Fix screwy ownerships
 
-for blip in conf default.prop fota.rc init init.goldfish.rc init.rc init.smdkc110.rc lib lpm.rc modules recovery.rc res sbin
+for blip in conf default.prop fota.rc init init.rc init.smdkc110.rc init.smdkc110.sh lib lpm.rc recovery.rc res sbin
 do
 	chown root.system /$blip
 	chown root.system /$blip/*
