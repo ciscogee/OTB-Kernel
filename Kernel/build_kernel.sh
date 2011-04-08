@@ -13,6 +13,28 @@ if [ ! -d arm-2009q3 ]; then
 	tar -xjf "$tarball"
 fi
 
+rm -rf fascinate_voodoo5
+
+	if [ ! -d lagfix ]; then
+		git clone git://github.com/project-voodoo/lagfix.git
+	fi
+
+	if [ ! -f lagfix/stages_builder/stages/stage1.tar ] || \
+		[ ! -f lagfix/stages_builder/stages/stage2.tar.lzma ] || \
+		[ ! -f lagfix/stages_builder/stages/stage3-sound.tar.lzma ]; then
+		cd lagfix/stages_builder
+		rm -f stages/stage*
+		./scripts/download_precompiled_stages.sh
+		cd ../../
+	fi
+
+	./lagfix/voodoo_injector/generate_voodoo_initramfs.sh \
+		-s initramfs \
+		-d fascinate_voodoo5 \
+		-p lagfix/voodoo_initramfs_parts \
+		-t lagfix/stages_builder/stages \
+		-u -w
+
 cd $WORK
 rm -f kernel_update-"$tag".zip
 make clean mrproper
