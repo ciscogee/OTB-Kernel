@@ -42,7 +42,7 @@ make ARCH=arm OTB_defconfig
 make -j `expr $(grep processor /proc/cpuinfo | wc -l) + 1` CROSS_COMPILE=../arm-2009q3/bin/arm-none-linux-gnueabi- \
 	ARCH=arm HOSTCFLAGS="-g -O3"
 
-cp -p arch/arm/boot/zImage update/kernel
+cp -p arch/arm/boot/zImage update/kernel_update
 cd update
 zip -r -q kernel_update.zip . 
 mv kernel_update.zip ../kernel_update-"$tag".zip
