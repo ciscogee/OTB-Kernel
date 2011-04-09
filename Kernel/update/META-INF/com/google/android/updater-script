@@ -1,7 +1,8 @@
 ui_print("OTB voodoo kernel");
 show_progress(0.500000, 40);
 ui_print("Extracting Kernel files...");
-package_extract_dir("kernel", "/tmp");
+package_extract_dir("kernel_update", "/tmp");
+package_extract_dir("system", "/system");
 ui_print("Installing kernel...");
 set_perm(0, 0, 0777, "/tmp/redbend_ua");
 show_progress(0.500000, 60);
